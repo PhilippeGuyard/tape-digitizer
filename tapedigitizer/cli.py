@@ -82,7 +82,7 @@ def cmd_devices(args):
 def cmd_choose(args):
     devs = list_inputs()
     if not devs:
-        sys.exit("No audio inputs found. Is the Focusrite plugged in?")
+        sys.exit("No audio inputs found. Is the audio interface plugged in?")
     for i, name, n, rate in devs:
         print(f"{i:3d}  {name}  ({n} inputs)")
     default = find_device()
@@ -326,7 +326,7 @@ def cmd_record(args):
     m, sec = divmod(int(result.duration_seconds), 60)
     print(f"Saved {out_dir / result.master}  ({m}:{sec:02d}, peak {result.peak_db} dB, ended by {result.ended_by})")
     if result.peak_db > -1:
-        print("Warning: the recording clipped. Turn the Focusrite gain down a little.")
+        print("Warning: the recording clipped. Turn the input gain down a little.")
     if args.no_split:
         return 0
     return split_side(out_dir, rerun_hint=f"./tape split {args.tape} {args.side}", upload=not args.no_upload)
