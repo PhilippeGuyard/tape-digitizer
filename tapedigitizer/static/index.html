@@ -105,6 +105,10 @@
     box-shadow: 0 8px 24px rgba(0,0,0,.18); transition: opacity .2s, transform .2s; z-index: 50; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .toast.err { background: var(--rec); }
+  .toast.busy { background: var(--ink); color: var(--bg); }
+  .toast.busy::before, .btn.saving::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 10px; vertical-align: -1px;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .btn:disabled { opacity: .5; cursor: default; }
 
@@ -406,7 +410,7 @@ function render(s, forceSetup) {
     loadLibrary(false);
     if (edName && edName === s.side) openEditor(edName);
   }
-  if (["done", "error"].includes(s.status) && edBusy) { edBusy = false; $("edMsg").textContent = s.message; updateEdButtons(); }
+  if (["done", "error"].includes(s.status) && edBusy) { edBusy = false; edSaveFinished(s); }
   lastStatus = s.status;
 }
 
@@ -551,9 +555,10 @@ function showEdState() {
   $("edState").textContent = cur === edOrig ? "" : cur === edDraft ? "Draft saved, not uploaded yet" : "Unsaved changes";
 }
 let toastTimer = null, draftDoneTimer = null;
-function toast(text, err) {
-  const t = $("toast"); t.textContent = text; t.classList.toggle("err", !!err); t.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
+// A note at the top of the window. `ms` = how long it stays; 0 keeps it until the next one.
+function toast(text, err, ms = 3000, busy = false) {
+  const t = $("toast"); t.textContent = text; t.classList.toggle("err", !!err); t.classList.toggle("busy", busy); t.classList.add("show");
+  clearTimeout(toastTimer); if (ms) toastTimer = setTimeout(() => t.classList.remove("show"), ms);
 }
 async function saveDraft(quiet) {
   if (!ed) return;
@@ -882,10 +887,29 @@ addEventListener("keydown", (e) => {
 });
 
 $("edReset").onclick = () => { checkpoint(); restore(edOrig); };
+let edSaveTimer = null;
+function edSaveShow(mode) {  // "saving", "done" or "" (back to normal)
+  const b = $("edSave");
+  clearTimeout(edSaveTimer);
+  b.classList.toggle("saving", mode === "saving"); b.classList.toggle("done", mode === "done");
+  b.textContent = mode === "saving" ? "Saving…" : mode === "done" ? "✓ Saved" : "Save and upload";
+  if (mode === "done") edSaveTimer = setTimeout(() => edSaveShow(""), 3000);
+}
+function edSaveFinished(s) {
+  updateEdButtons();
+  const saving = $("edSave").classList.contains("saving");  // otherwise it was a rename
+  if (s.status === "error") { edSaveShow(""); toast(s.message, true, 8000); $("edMsg").textContent = s.message; return; }
+  $("edMsg").textContent = "";
+  if (!saving) return toast(s.message, false, 4000);
+  edSaveShow("done");
+  const n = (s.message.match(/Saved (\d+) tracks/) || [])[1];
+  toast(n ? `Saved ${n} tracks. Google Drive is uploading them now.` : s.message, false, 5000);
+}
 $("edSave").onclick = async () => {
-  edBusy = true; updateEdButtons(); $("edMsg").textContent = "Saving…";
+  edBusy = true; updateEdButtons(); edSaveShow("saving"); $("edMsg").textContent = "";
+  toast("Cutting the tracks and saving them to Google Drive…", false, 0, true);
   try { await api("/api/side/save", { name: edName, tracks: ed.tracks }); poll(); }
-  catch (e) { edBusy = false; $("edMsg").textContent = e.message; updateEdButtons(); }
+  catch (e) { edBusy = false; edSaveShow(""); updateEdButtons(); toast("Couldn't save: " + e.message, true, 8000); }
 };
 $("edDelete").onclick = async () => {
   if (!confirm(`Delete ${edName} from this Mac? It moves to ~/TapeDigitizer/deleted, and the copy in Google Drive is kept.`)) return;
