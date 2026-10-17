@@ -1,0 +1,52 @@
+"""Saving tracks to the (pretend) Google Drive folder."""
+
+import csv
+
+import numpy as np
+import soundfile as sf
+
+from tapedigitizer import cli
+
+SR = 22050
+
+
+def make_side(root, name="Tape 001 - Side A"):
+    side = root / name / "tracks"
+    side.mkdir(parents=True)
+    (root / name / f"{name}.flac").write_bytes(b"master")
+    t = np.arange(SR * 5) / SR
+    for i, stem in enumerate(["01", "02 - The Message"]):
+        x = 0.2 * np.sin(2 * np.pi * (220 + 110 * i) * t)
+        sf.write(side / f"{stem}.flac", np.stack([x, x], 1), SR, subtype="PCM_24")
+    return side.parent
+
+
+def test_export_writes_tagged_mp3s_and_log(tmp_path, isolated):
+    work = tmp_path / "work"
+    make_side(work)
+    assert cli.main(["export", "1", "A", "--out", str(work)]) == 0
+
+    folder = isolated / "Tape 001" / "Side A"
+    mp3s = sorted(p.name for p in folder.glob("*.mp3"))
+    assert mp3s == ["01.mp3", "02 - The Message.mp3"]
+    f = sf.SoundFile(folder / "02 - The Message.mp3")
+    assert (f.title, f.album, f.tracknumber) == ("The Message", "Tape 001 Side A", "2")
+    assert abs(f.frames / f.samplerate - 5) < 0.1
+
+    rows = list(csv.DictReader((isolated / "log.csv").open()))
+    assert [(r["tape"], r["side"], r["tracks"]) for r in rows] == [("Tape 001", "A", "2")]
+    assert (isolated / "Masters" / "Tape 001 - Side A.flac").read_bytes() == b"master"
+
+
+def test_reexport_replaces_tracks_and_log_row(tmp_path, isolated):
+    work = tmp_path / "work"
+    side = make_side(work)
+    cli.main(["export", "1", "A", "--out", str(work)])
+    (side / "tracks" / "02 - The Message.flac").unlink()
+    cli.main(["export", "1", "A", "--out", str(work)])
+    make_side(work, "Tape 002 - Side B")
+    cli.main(["export", "2", "b", "--out", str(work)])
+
+    assert [p.name for p in (isolated / "Tape 001" / "Side A").glob("*.mp3")] == ["01.mp3"]
+    rows = list(csv.DictReader((isolated / "log.csv").open()))
+    assert [(r["tape"], r["side"], r["tracks"]) for r in rows] == [("Tape 001", "A", "1"), ("Tape 002", "B", "2")]
