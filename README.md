@@ -70,7 +70,10 @@ terminal, `./tape app` does the same.)
    Click **Listen** to hear the deck through the Mac's current sound output;
    the slider next to it sets the volume. It doesn't affect the recording.
 2. Type a tape number (it becomes "Tape 012") or a name ("Summer mix 1987"),
-   pick side A or B, and press **Start**.
+   pick side A or B, and press **Start**. For a tape with no name yet, click
+   **No name yet?**: it's saved as "Unnamed 001", "Unnamed 002" and so on (a
+   separate count from tape numbers, so write it on the cassette), and side B
+   of the same tape follows on. Rename it once you know what it is.
 3. Press play on the deck and leave it. The side records, splits and saves.
    Then press **Record the next side**.
 4. Later, open any side in the library. Sides marked **Check splits** have

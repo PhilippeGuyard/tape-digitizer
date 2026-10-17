@@ -68,7 +68,11 @@
 
   #record { padding: 22px; }
   .setup { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
-  label.field { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+  label.field, div.field { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+  .field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .linkish { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+  .linkish:hover { text-decoration: underline; }
+  .tag { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; }
   .tape-field { flex: 1 1 320px; max-width: 520px; }
   .tape-input { width: 100%; font-size: 24px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -208,9 +212,11 @@
   <section class="card" id="record">
     <h2>Record a side</h2>
     <div class="setup">
-      <label class="field tape-field">Tape (a number, or a name)
+      <div class="field tape-field">
+        <span class="field-head"><label for="tapeNum">Tape (a number, or a name)</label>
+          <button class="linkish" id="noNameBtn" type="button" title="Record it as Unnamed 001, 002… and rename it later">No name yet?</button></span>
         <input class="tape-input" id="tapeNum" autocomplete="off" spellcheck="false" placeholder="e.g. 12, or Summer mix 1987">
-      </label>
+      </div>
       <div class="field" style="display:grid;gap:6px;font-size:12px;color:var(--muted)">Side
         <div class="seg" role="group" aria-label="Side">
           <button id="sideA" aria-pressed="true">A</button><button id="sideB" aria-pressed="false">B</button>
@@ -329,9 +335,20 @@ let side = "A", state = null, lastStatus = null, library = [];
 function setSide(s) { side = s; $("sideA").setAttribute("aria-pressed", s === "A"); $("sideB").setAttribute("aria-pressed", s === "B"); }
 $("sideA").onclick = () => setSide("A"); $("sideB").onclick = () => setSide("B");
 
+// A tape with no name yet is recorded as Unnamed 001, 002… (numbered by the app).
+let noName = false;
+const TAPE_HINT = "e.g. 12, or Summer mix 1987";
+function setNoName(on) {
+  noName = on; $("noNameBtn").hidden = on;
+  if (on) $("tapeNum").value = "";
+  $("tapeNum").placeholder = on ? "Unnamed: it gets the next Unnamed number" : TAPE_HINT;
+}
+$("noNameBtn").onclick = () => setNoName(true);
+$("tapeNum").addEventListener("input", () => { if (noName && $("tapeNum").value.trim()) setNoName(false); });
+
 $("startBtn").onclick = async () => {
   const tape = $("tapeNum").value.trim();
-  if (!tape) { $("tapeNum").focus(); return; }
+  if (!tape && !noName) { $("tapeNum").focus(); return; }
   try { await api("/api/start", { tape, side }); poll(); }
   catch (e) { $("setupHint").textContent = e.message; $("setupHint").style.color = css("--rec"); }
 };
@@ -434,11 +451,16 @@ async function loadLibrary(setNext) {
     const badge = x.draft ? '<span class="badge draft">Draft</span>' : x.needs_check ? '<span class="badge check">Check splits</span>' : x.saved ? '<span class="badge saved">In Drive</span>' : "";
     row.innerHTML = `<span class="n"></span>${badge}<span class="m tnum"></span>`;
     row.querySelector(".n").textContent = x.name;
+    if (/^Unnamed \d+ - Side /.test(x.name)) row.querySelector(".n").insertAdjacentHTML("beforeend", '<span class="tag" title="No name yet: open it and press Rename">Unnamed</span>');
     row.querySelector(".m").textContent = `${x.tracks} tracks · ${x.minutes} min · ${x.recorded}`;
     row.onclick = () => openEditor(x.name);
     list.appendChild(row);
   });
-  if (setNext || !$("tapeNum").value) { $("tapeNum").value = d.next.tape; setSide(d.next.side); }
+  if (setNext || (!$("tapeNum").value && !noName)) {
+    setNoName(!!d.next.unnamed);
+    if (!d.next.unnamed) $("tapeNum").value = d.next.tape;
+    setSide(d.next.side);
+  }
   $("openDrive").hidden = !d.drive;
 }
 $("openDrive").onclick = () => api("/api/reveal", {});

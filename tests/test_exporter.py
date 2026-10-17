@@ -77,3 +77,15 @@ def test_renaming_a_side_moves_it_in_the_work_folder_and_in_drive(tmp_path, isol
     assert not (isolated / "Masters" / "Tape 001 - Side A.flac").exists()
     with (isolated / "log.csv").open(newline="") as f:
         assert [(r["tape"], r["side"]) for r in csv.DictReader(f)] == [("Summer mix 1987", "B")]
+
+
+def test_tapes_with_no_name_get_their_own_running_number(tmp_path):
+    from tapedigitizer import app
+
+    eng = app.Engine.__new__(app.Engine)
+    eng.work_dir = tmp_path
+    assert eng.unnamed_side("A") == "Unnamed 001 - Side A"
+    (tmp_path / "Unnamed 001 - Side A").mkdir()
+    (tmp_path / "Tape 007 - Side A").mkdir()
+    assert eng.unnamed_side("B") == "Unnamed 001 - Side B"  # the other side of the same tape
+    assert eng.unnamed_side("A") == "Unnamed 002 - Side A"  # a new tape

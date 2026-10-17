@@ -32,6 +32,7 @@ from .recorder import RecorderSettings, State, find_device, list_inputs, parse_i
 
 STATIC = Path(__file__).parent / "static"
 SIDE_RE = re.compile(r"^(.+) - Side ([A-Za-z0-9]+)$")
+UNNAMED_RE = re.compile(r"^Unnamed (\d+) - Side ")
 
 
 class Monitor:
@@ -204,7 +205,7 @@ class Engine:
                 raise RuntimeError("Already working on a side.")
             if self.stream is None:
                 raise RuntimeError(self.source_error or "No audio input is open.")
-            name = cli.side_name(tape, side)
+            name = cli.side_name(tape, side) if tape.strip() else self.unnamed_side(side)
             if (self.work_dir / name / f"{name}.flac").exists():
                 raise RuntimeError(f"{name} is already recorded. Delete it from the library first to record it again.")
             self.side, self.status, self.message, self.job = name, "waiting", "Press play on the deck", "record"
@@ -411,9 +412,28 @@ class Engine:
         rms = np.sqrt(np.mean(audio[: n * frame].reshape(n, frame).astype(np.float64) ** 2, axis=1)) if n else np.zeros(0)
         return {"start": start, "step": step, "wave": [round(db(float(x)), 1) for x in rms]}
 
+    def unnamed_side(self, side: str) -> str:
+        """A temporary name for a tape with no name yet: Unnamed 001, 002…
+
+        They have their own counter, so they never take a tape number. The
+        latest unnamed tape is reused for its missing side (B after A).
+        """
+        names = {d.name for d in self.work_dir.iterdir()} if self.work_dir.exists() else set()
+        nums = [int(m.group(1)) for n in names if (m := UNNAMED_RE.match(n))]
+        top = max(nums, default=0)
+        if top and cli.side_name(f"Unnamed {top:03d}", side) not in names:
+            return cli.side_name(f"Unnamed {top:03d}", side)
+        return cli.side_name(f"Unnamed {top + 1:03d}", side)
+
     def next_side(self) -> dict:
-        """Suggest the next numbered side: B of the latest tape, else A of the one after."""
-        names = {s["name"] for s in self.library()}
+        """Suggest the next side: B of an unnamed tape just recorded, else B of the
+        latest numbered tape, else A of the one after."""
+        sides = self.library()
+        names = {s["name"] for s in sides}
+        latest = max(sides, key=lambda s: s["recorded"], default=None)
+        if latest and (m := UNNAMED_RE.match(latest["name"])) and latest["name"].endswith(" - Side A") \
+                and cli.side_name(f"Unnamed {m.group(1)}", "B") not in names:
+            return {"tape": "", "side": "B", "unnamed": True}
         nums = [int(m.group(1)) for n in names if (m := re.match(r"^Tape (\d+) - Side ", n))]
         if not nums:
             return {"tape": "1", "side": "A"}
