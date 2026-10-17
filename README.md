@@ -78,8 +78,9 @@ terminal, `./tape app` does the same.)
 
 In the editor:
 
-- Zoom with − and +, a trackpad pinch or Ctrl + scroll. Click the waveform to
-  play from there.
+- Zoom by sliding two fingers up and down on the trackpad, by pinching, or
+  with − and +. Swipe sideways to move along. Click the waveform to play from
+  there; P (or the Play button) plays and pauses.
 - **Add split at playhead** (S, or double-click the waveform). Click a split to
   select it, then drag it, nudge it by 0.1 s or 1 s, listen across it, or
   remove it (Delete).

@@ -155,6 +155,10 @@
   .skip-btn:hover { color: var(--ink); border-color: var(--muted); }
   .skipped .skip-btn { color: var(--accent); border-color: var(--accent); }
   .icon-btn { border: 0; background: transparent; cursor: pointer; color: var(--muted); padding: 4px 8px; border-radius: 6px; font-size: 14px; }
+  .play-btn { display: inline-flex; align-items: center; gap: 8px; }
+  .play-btn svg, .icon-btn.play svg { width: 14px; height: 14px; fill: currentColor; }
+  .icon-btn.play { display: inline-flex; align-items: center; }
+  .icon-btn.play.on { color: var(--accent); }
   .icon-btn:hover { color: var(--ink); background: var(--bg); }
   .ed-foot { display: flex; gap: 10px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
   .ed-foot .msg { margin-left: auto; font-size: 13px; }
@@ -237,7 +241,7 @@
     <div class="ed-head">
       <span class="side-title" id="edTitle"></span>
       <span class="ed-state" id="edState"></span>
-      <button class="btn" id="edPlay">Play</button>
+      <button class="btn play-btn" id="edPlay" title="Play / pause (P)"><svg viewBox="0 0 16 16" aria-hidden="true"></svg><span>Play</span></button>
       <button class="btn" id="edFolder">Show files</button>
       <button class="icon-btn" id="edClose" title="Close">Close</button>
     </div>
@@ -264,7 +268,7 @@
       </div>
       <canvas id="zoomWave"></canvas>
     </div>
-    <div class="ed-help">Zoom with − and +, a trackpad pinch, or Ctrl + scroll; scroll sideways or drag the strip underneath to move along. Click the waveform to play from there. Add a split at the playhead (or double-click the waveform); click a split to select it, then fine-tune it in the close-up or remove it. "Skip" leaves a section out (silence, talk, a mistake): put splits around it, then press Skip on that row.</div>
+    <div class="ed-help">Zoom with two fingers up and down on the trackpad, a pinch, or − and +; swipe sideways or drag the strip underneath to move along. P plays and pauses. Click the waveform to play from there. Add a split at the playhead (or double-click the waveform); click a split to select it, then fine-tune it in the close-up or remove it. "Skip" leaves a section out (silence, talk, a mistake): put splits around it, then press Skip on that row.</div>
     <table class="tracks"><tbody id="edTracks"></tbody></table>
     <div class="ed-foot">
       <button class="btn primary" id="edSave" disabled title="Cut the tracks and replace them in Google Drive">Save and upload</button>
@@ -472,9 +476,24 @@ async function openEditor(name) {
 }
 $("edClose").onclick = () => { if (ed && JSON.stringify(ed.tracks) !== edDraft) saveDraft(true); player.pause(); $("editor").classList.remove("open"); edName = null; document.querySelectorAll(".lib-row.sel").forEach((r) => r.classList.remove("sel")); };
 $("edFolder").onclick = () => api("/api/reveal", { name: edName });
+const ICON_PLAY = '<path d="M4 2.5v11l9.5-5.5z"/>', ICON_PAUSE = '<rect x="3" y="2.5" width="3.6" height="11" rx="1"/><rect x="9.4" y="2.5" width="3.6" height="11" rx="1"/>';
 $("edPlay").onclick = () => player.paused ? player.play() : player.pause();
-player.onplay = () => $("edPlay").textContent = "Pause";
-player.onpause = () => $("edPlay").textContent = "Play";
+function showPlaying() {
+  const on = !player.paused;
+  $("edPlay").querySelector("svg").innerHTML = on ? ICON_PAUSE : ICON_PLAY;
+  $("edPlay").querySelector("span").textContent = on ? "Pause" : "Play";
+  // The row being played shows a pause button; the others show play.
+  if (!ed) return;
+  const t = player.currentTime;
+  document.querySelectorAll("#edTracks .play").forEach((b, k) => {
+    const tr = ed.tracks[k], here = on && tr && t >= tr.start && t < tr.end;
+    if (b.classList.contains("on") === here && b.innerHTML) return;
+    b.classList.toggle("on", here); b.title = here ? "Pause" : "Play this section";
+    b.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${here ? ICON_PAUSE : ICON_PLAY}</svg>`;
+  });
+}
+player.onplay = player.onpause = showPlaying;
+showPlaying();
 
 const cuts = () => ed.tracks.slice(1).map((t) => t.start);
 // Numbers of the kept (not skipped) sections, as they'll be named on disk.
@@ -547,7 +566,7 @@ function renderTracks() {
     const tr = document.createElement("tr");
     tr.className = t.skip ? "skipped" : "";
     const n = nums[i];
-    tr.innerHTML = `<td class="num tnum">${n ? String(n).padStart(2, "0") : "–"}</td><td><input></td><td class="time tnum">${fmt(t.start)}</td><td class="time tnum">${fmt(t.end - t.start)}</td><td class="skipcell"><button class="skip-btn"></button></td><td style="width:40px"><button class="icon-btn play" title="Play this section">▶</button></td>`;
+    tr.innerHTML = `<td class="num tnum">${n ? String(n).padStart(2, "0") : "–"}</td><td><input></td><td class="time tnum">${fmt(t.start)}</td><td class="time tnum">${fmt(t.end - t.start)}</td><td class="skipcell"><button class="skip-btn"></button></td><td style="width:40px"><button class="icon-btn play" title="Play this section"></button></td>`;
     const inp = tr.querySelector("input"); inp.value = t.title;
     inp.placeholder = t.skip ? "Skipped: not saved" : `Track ${n}`;
     inp.setAttribute("aria-label", t.skip ? "Skipped section" : `Title of track ${n}`);
@@ -558,9 +577,13 @@ function renderTracks() {
     sk.textContent = t.skip ? "Keep" : "Skip";
     sk.title = t.skip ? "Save this section as a track" : "Don't save this section (silence, talk, a mistake…)";
     sk.onclick = () => toggleSkip(i);
-    tr.querySelector(".play").onclick = () => { player.currentTime = t.start; player.play(); };
+    tr.querySelector(".play").onclick = (e) => {
+      if (e.currentTarget.classList.contains("on")) return player.pause();
+      player.currentTime = t.start; player.play();
+    };
     body.appendChild(tr);
   });
+  showPlaying();
 }
 
 // Height of the waveform: square root of the amplitude, relative to the loudest point,
@@ -687,7 +710,7 @@ player.ontimeupdate = () => {
   // Keep the playhead in view while zoomed in.
   const t = player.currentTime, span = view.b - view.a;
   if (ed && !player.paused && span < ed.duration && !drag && (t > view.b || t < view.a)) setView(t - span * 0.1, t + span * 0.9);
-  drawEd(); drawZoom();
+  drawEd(); drawZoom(); showPlaying();
 };
 addEventListener("resize", () => { drawEd(); drawMini(); drawZoom(); if (state) drawLiveWave(state.live_wave); });
 
@@ -700,10 +723,13 @@ mini.addEventListener("pointerup", () => miniDrag = false);
 $("edWave").addEventListener("wheel", (e) => {
   if (!ed) return;
   const span = view.b - view.a;
+  e.preventDefault();
   if (e.ctrlKey || e.metaKey) {  // a trackpad pinch arrives as ctrl + wheel
-    e.preventDefault(); zoomBy(Math.exp(e.deltaY * 0.01), edGeom().t(e.offsetX));
-  } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {
-    e.preventDefault(); const d = (e.shiftKey ? e.deltaY : e.deltaX) / edGeom().w * span; setView(view.a + d, view.b + d);
+    zoomBy(Math.exp(e.deltaY * 0.01), edGeom().t(e.offsetX));
+  } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {  // two fingers sideways: move along
+    const d = (e.shiftKey ? e.deltaY : e.deltaX) / edGeom().w * span; setView(view.a + d, view.b + d);
+  } else {  // two fingers up / down: zoom in / out around the pointer
+    zoomBy(Math.exp(-e.deltaY * 0.004), edGeom().t(e.offsetX));
   }
 }, { passive: false });
 
@@ -788,7 +814,14 @@ document.querySelectorAll("[data-nudge]").forEach((b) => b.onclick = () => nudge
 $("zoomListen").onclick = () => { player.currentTime = Math.max(0, cuts()[sel] - 4); player.play(); };
 $("zoomRemove").onclick = () => removeCut(sel);
 $("zzIn").onclick = () => closeZoom(-1); $("zzOut").onclick = () => closeZoom(1);
-$("zoomWave").addEventListener("wheel", (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); closeZoom(e.deltaY > 0 ? 1 : -1); } }, { passive: false });
+// The close-up zooms in steps, so trackpad scrolling is gathered up before each step.
+let zoomWheel = 0;
+$("zoomWave").addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  zoomWheel += (e.ctrlKey || e.metaKey) ? -e.deltaY * 2 : e.deltaY;
+  if (Math.abs(zoomWheel) >= 40) { closeZoom(zoomWheel > 0 ? -1 : 1); zoomWheel = 0; }
+}, { passive: false });
 const zw = $("zoomWave");
 zw.addEventListener("pointerdown", (e) => { checkpoint(); zoomDrag = true; zw.setPointerCapture(e.pointerId); moveCut(sel, zoomGeom().t(e.offsetX)); drawEd(); drawZoom(); });
 zw.addEventListener("pointermove", (e) => { if (!zoomDrag) return; moveCut(sel, zoomGeom().t(e.offsetX)); drawEd(); drawZoom(); });
@@ -799,6 +832,7 @@ addEventListener("keydown", (e) => {
     if (e.key === "-" || e.key === "_") { zoomBy(2); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (e.key === "s" || e.key === "S") { $("addSplit").onclick(); return; }
+    if (e.key === "p" || e.key === "P") { $("edPlay").onclick(); return; }
     if ((e.key === "Delete" || e.key === "Backspace") && sel >= 0) { e.preventDefault(); removeCut(sel); return; }
   }
   if (sel < 0 || e.target.tagName === "INPUT" || !$("editor").classList.contains("open")) return;
