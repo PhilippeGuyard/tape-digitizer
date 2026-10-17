@@ -125,6 +125,11 @@
   #editor.open { display: block; }
   .ed-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .ed-head .side-title { margin-right: 4px; }
+  .rename { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; }
+  .rename input { font: inherit; font-size: 18px; font-weight: 600; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+  #renameTape { flex: 1 1 260px; min-width: 160px; max-width: 420px; }
+  #renameSide { width: 3.2em; text-align: center; text-transform: uppercase; }
+  .rename .muted { color: var(--muted); }
   .ed-state { margin-right: auto; font-size: 12px; color: var(--muted); }
   .badge.draft { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
   .note { margin: 14px 0 0; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--ink); font-size: 14px; }
@@ -240,6 +245,14 @@
   <section class="card" id="editor">
     <div class="ed-head">
       <span class="side-title" id="edTitle"></span>
+      <button class="icon-btn" id="edRename" title="Change the tape name or side">Rename</button>
+      <form class="rename" id="renameForm" hidden>
+        <input id="renameTape" aria-label="Tape" autocomplete="off" spellcheck="false" placeholder="Tape number or name">
+        <span class="muted">Side</span>
+        <input id="renameSide" aria-label="Side" maxlength="2" autocomplete="off">
+        <button class="btn primary" type="submit">Rename</button>
+        <button class="btn" type="button" id="renameCancel">Cancel</button>
+      </form>
       <span class="ed-state" id="edState"></span>
       <button class="btn play-btn" id="edPlay" title="Play / pause (P)"><svg viewBox="0 0 16 16" aria-hidden="true"></svg><span>Play</span></button>
       <button class="btn" id="edFolder">Show files</button>
@@ -454,12 +467,40 @@ $("dlgOk").onclick = async () => {
   catch (e) { $("dlgErr").textContent = e.message; }
 };
 
+// ---------- renaming a side ----------
+function showRename(on) {
+  $("renameForm").hidden = !on; $("edTitle").hidden = on; $("edRename").hidden = on;
+  if (!on) return;
+  const m = edName.match(/^(.+) - Side (\w+)$/);
+  $("renameTape").value = m ? m[1] : edName; $("renameSide").value = m ? m[2] : "A";
+  $("renameTape").focus(); $("renameTape").select();
+}
+$("edRename").onclick = () => showRename(true);
+$("renameCancel").onclick = () => showRename(false);
+$("renameForm").addEventListener("keydown", (e) => { if (e.key === "Escape") showRename(false); });
+$("renameForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const old = edName;
+  try {
+    // Keep any edits in progress; they move with the side.
+    if (ed && JSON.stringify(ed.tracks) !== edDraft) await saveDraft(true);
+    const r = await api("/api/side/rename", { name: old, tape: $("renameTape").value, side: $("renameSide").value });
+    showRename(false);
+    if (r.name === old) return;
+    await openEditor(r.name);
+    loadLibrary(false);
+    const s = await api("/api/state");
+    if (s.job === "edit" && s.status === "saving") { edBusy = true; updateEdButtons(); $("edMsg").textContent = s.message + "…"; }
+    toast(`Renamed to ${r.name}.`);
+  } catch (err) { toast("Couldn't rename: " + err.message, true); }
+};
+
 // ---------- side editor ----------
 let edName = null, ed = null, edOrig = null, edBusy = false, drag = null;
 const player = $("player");
 
 async function openEditor(name) {
-  edName = name;
+  edName = name; showRename(false);
   $("editor").classList.add("open"); $("edTitle").textContent = name; $("edMsg").textContent = "Loading the waveform…";
   const d = await api("/api/side?name=" + encodeURIComponent(name));
   if (edName !== name) return;

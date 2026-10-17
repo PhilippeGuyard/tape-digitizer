@@ -88,6 +88,33 @@ def export_side(side_dir: Path, dest_root: Path, split_by: str = "", needs_check
     return dest
 
 
+def remove_side(dest_root: Path, name: str) -> dict | None:
+    """Take a side out of Drive: its MP3s, its master and its log row.
+
+    Returns the side's old log row, if it had one.
+    """
+    tape, side = parse_side_name(name)
+    folder = dest_root / tape / (f"Side {side}" if side else "")
+    if folder.is_dir():
+        for old in folder.glob("*.mp3"):
+            old.unlink()
+        for d in (folder, folder.parent):
+            if d != dest_root and d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+    (dest_root / "Masters" / f"{name}.flac").unlink(missing_ok=True)
+    path, row = dest_root / "log.csv", None
+    if path.exists():
+        with path.open(newline="") as f:
+            rows = list(csv.DictReader(f))
+        keep = [r for r in rows if (r["tape"], r["side"]) != (tape, side)]
+        row = next((r for r in rows if (r["tape"], r["side"]) == (tape, side)), None)
+        with path.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=LOG_FIELDS)
+            w.writeheader()
+            w.writerows(keep)
+    return row
+
+
 def write_log(path: Path, row: dict) -> None:
     """One row per side; exporting a side again updates its row."""
     rows = []

@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-from . import cli, splitter
+from . import cli, exporter, splitter
 from .recorder import RecorderSettings, State, find_device, list_inputs, parse_inputs, record_side
 
 STATIC = Path(__file__).parent / "static"
@@ -267,6 +267,44 @@ class Engine:
             self.status, self.side, self.message, self.job = "saving", name, "Re-cutting and saving to Google Drive", "edit"
         threading.Thread(target=self._save, args=(side_dir, name, tracks), daemon=True).start()
 
+    def rename_side(self, name: str, tape: str, side: str) -> str:
+        """Give a side a new tape name or side letter, in the work folder and in Drive.
+
+        The work folder is renamed straight away. If the side was already in
+        Drive, it is taken out under the old name and saved again under the
+        new one (so the MP3 tags match), in the background.
+        """
+        old_dir = self.side_dir(name)
+        new = cli.side_name(tape, side)
+        if new == name:
+            return name
+        with self.lock:
+            if self.busy:
+                raise RuntimeError("Wait for the current side to finish first.")
+            new_dir = self.side_dir(new)
+            if new_dir.exists():
+                raise RuntimeError(f"There's already a side called {new}.")
+            old_dir.rename(new_dir)
+            for ext in (".flac", ".json"):
+                f = new_dir / f"{name}{ext}"
+                if f.exists():
+                    f.rename(new_dir / f"{new}{ext}")
+            dest = cli.drive_folder()
+            row = exporter.remove_side(dest, name) if dest and dest.exists() else None
+            if row is None:
+                return new
+            self.status, self.side, self.message, self.job = "saving", new, f"Saving {new} to Google Drive under its new name", "edit"
+        threading.Thread(target=self._reexport, args=(new_dir, new, row), daemon=True).start()
+        return new
+
+    def _reexport(self, side_dir: Path, name: str, row: dict):
+        try:
+            cli.export(side_dir, row.get("split_by", ""), row.get("needs_check") == "yes")
+            self.status, self.message = "done", f"Renamed to {name}."
+        except Exception as e:
+            traceback.print_exc()
+            self.status, self.message = "error", f"Renamed, but couldn't save to Drive: {e}"
+
     def save_draft(self, name: str, tracks: list[dict] | None):
         """Keep edits to come back to later, without cutting or uploading anything.
         `None` throws the draft away."""
@@ -466,6 +504,8 @@ def make_handler(engine: Engine):
                 if url.path == "/api/side/draft":
                     engine.save_draft(body["name"], body.get("tracks"))
                     return self.send_json({"ok": True})
+                if url.path == "/api/side/rename":
+                    return self.send_json({"name": engine.rename_side(body["name"], str(body["tape"]), str(body["side"]))})
                 if url.path == "/api/side/save":
                     engine.save_edits(body["name"], body["tracks"])
                     return self.send_json({"ok": True})

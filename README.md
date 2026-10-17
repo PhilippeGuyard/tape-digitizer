@@ -90,6 +90,8 @@ In the editor:
 - **Save for later** keeps your edits without cutting or uploading anything
   (edits are also kept automatically a few seconds after each change).
 - **Save and upload** re-cuts the side and replaces its MP3s.
+- **Rename** next to the side's title changes its tape name or side letter.
+  If the side is already in Drive, it's saved again under the new name.
 
 Closing the Terminal window that opens with the app quits it.
 

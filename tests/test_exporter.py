@@ -50,3 +50,30 @@ def test_reexport_replaces_tracks_and_log_row(tmp_path, isolated):
     assert [p.name for p in (isolated / "Tape 001" / "Side A").glob("*.mp3")] == ["01.mp3"]
     rows = list(csv.DictReader((isolated / "log.csv").open()))
     assert [(r["tape"], r["side"], r["tracks"]) for r in rows] == [("Tape 001", "A", "1"), ("Tape 002", "B", "2")]
+
+
+def test_renaming_a_side_moves_it_in_the_work_folder_and_in_drive(tmp_path, isolated):
+    import time
+    from tapedigitizer import app
+
+    work = tmp_path / "work"
+    make_side(work)
+    assert cli.main(["export", "1", "A", "--out", str(work)]) == 0
+
+    eng = app.Engine.__new__(app.Engine)  # no audio device needed for this
+    eng.work_dir, eng.lock, eng.status = work, app.threading.Lock(), "idle"
+    assert eng.rename_side("Tape 001 - Side A", "Summer mix 1987", "b") == "Summer mix 1987 - Side B"
+    for _ in range(100):
+        if eng.status != "saving":
+            break
+        time.sleep(0.1)
+    assert eng.status == "done", eng.message
+
+    new = work / "Summer mix 1987 - Side B"
+    assert (new / "Summer mix 1987 - Side B.flac").exists() and not (work / "Tape 001 - Side A").exists()
+    assert not (isolated / "Tape 001").exists()
+    assert sorted(p.name for p in (isolated / "Summer mix 1987" / "Side B").glob("*.mp3")) == ["01.mp3", "02 - The Message.mp3"]
+    assert (isolated / "Masters" / "Summer mix 1987 - Side B.flac").exists()
+    assert not (isolated / "Masters" / "Tape 001 - Side A.flac").exists()
+    with (isolated / "log.csv").open(newline="") as f:
+        assert [(r["tape"], r["side"]) for r in csv.DictReader(f)] == [("Summer mix 1987", "B")]
