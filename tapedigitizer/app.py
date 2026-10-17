@@ -34,6 +34,68 @@ STATIC = Path(__file__).parent / "static"
 SIDE_RE = re.compile(r"^(.+) - Side ([A-Za-z0-9]+)$")
 
 
+class Monitor:
+    """Plays the incoming signal through the Mac's sound output, so you can hear the deck.
+
+    The input callback hands blocks to `feed`; an output stream on the default
+    output device plays them back. A short buffer keeps latency around 0.2 s.
+    """
+
+    MAX_BUFFER = 0.5  # seconds; anything older is dropped so the sound never lags behind
+
+    def __init__(self, samplerate: int):
+        self.samplerate = samplerate
+        self.on = False
+        self.volume = 0.8
+        self.error = ""
+        self.output_name = ""
+        self.stream = None
+        self.buf = np.zeros((0, 2), dtype="float32")
+        self.lock = threading.Lock()
+
+    def feed(self, block: np.ndarray):
+        if not self.on:
+            return
+        stereo = np.repeat(block, 2, axis=1) if block.shape[1] == 1 else block[:, :2]
+        with self.lock:
+            self.buf = np.concatenate([self.buf, stereo])[-int(self.MAX_BUFFER * self.samplerate):]
+
+    def _play(self, outdata, frames, t, status):
+        with self.lock:
+            n = min(frames, len(self.buf))
+            outdata[:n] = self.buf[:n] * self.volume
+            outdata[n:] = 0
+            self.buf = self.buf[n:]
+
+    def set(self, on: bool | None = None, volume: float | None = None):
+        import sounddevice as sd
+
+        if volume is not None:
+            self.volume = float(min(max(volume, 0.0), 1.0))
+        if on is None or on == self.on:
+            return
+        self.on, self.error = on, ""
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+        with self.lock:
+            self.buf = np.zeros((0, 2), dtype="float32")
+        if not on:
+            return
+        try:
+            self.output_name = sd.query_devices(kind="output")["name"]
+            self.stream = sd.OutputStream(
+                samplerate=self.samplerate, channels=2, dtype="float32",
+                blocksize=int(self.samplerate * 0.02), callback=self._play,
+            )
+            self.stream.start()
+        except Exception as e:  # no output device, unsupported rate, etc.
+            self.on, self.stream, self.error = False, None, str(e)
+
+    def state(self) -> dict:
+        return {"on": self.on, "volume": round(self.volume, 2), "output": self.output_name, "error": self.error}
+
+
 def db(x: float) -> float:
     return float(20 * np.log10(max(x, 1e-6)))
 
@@ -60,7 +122,16 @@ class Engine:
         self._wave_acc: list[float] = []
         self.stop_requested = False
         self.settings = RecorderSettings()
+        self.monitor = Monitor(self.settings.samplerate)
         self.load_source()
+        cfg = cli.load_config()
+        self.monitor.set(on=bool(cfg.get("monitor", False)), volume=cfg.get("monitor_volume", 0.8))
+
+    def set_monitor(self, on: bool | None, volume: float | None):
+        self.monitor.set(on, volume)
+        cfg = cli.load_config()
+        cfg.update(monitor=self.monitor.on, monitor_volume=self.monitor.volume)
+        cli.save_config(cfg)
 
     # ---- audio source -------------------------------------------------
 
@@ -94,6 +165,7 @@ class Engine:
                 {"input": inp, "db": db(float(np.sqrt(np.mean(block[:, k] ** 2)))), "peak": db(float(np.max(np.abs(block[:, k]))))}
                 for k, inp in enumerate(self.inputs)
             ]
+            self.monitor.feed(block)
             q = self.rec_q
             if q is not None:
                 q.put(block.copy())
@@ -324,6 +396,7 @@ class Engine:
             "end_silence": self.settings.end_silence_seconds,
             "live_wave": self.live_wave[-2400:],
             "meter": self.meter,
+            "monitor": self.monitor.state(),
             "source": {
                 "device": self.device,
                 "device_name": names.get(self.device, "Default input"),
@@ -380,6 +453,9 @@ def make_handler(engine: Engine):
                 body = self.read_json()
                 if url.path == "/api/source":
                     engine.open_source(body.get("device"), parse_inputs(body.get("inputs", "1,2")))
+                    return self.send_json(engine.state())
+                if url.path == "/api/monitor":
+                    engine.set_monitor(body.get("on"), body.get("volume"))
                     return self.send_json(engine.state())
                 if url.path == "/api/start":
                     engine.start(str(body["tape"]).strip(), str(body["side"]).strip())

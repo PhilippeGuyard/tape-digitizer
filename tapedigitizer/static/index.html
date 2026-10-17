@@ -50,6 +50,11 @@
   .chip:hover { color: var(--ink); }
   .chip.err { color: var(--rec); border-color: var(--rec); }
   .meters { display: grid; gap: 4px; width: 220px; }
+  .listen { display: flex; align-items: center; gap: 8px; }
+  .listen .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .listen .chip svg { width: 15px; height: 15px; }
+  .listen .chip.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .listen input[type=range] { width: 80px; accent-color: var(--ok); }
   .meter { display: grid; grid-template-columns: 28px 1fr 44px; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .bar { height: 8px; background: var(--meter-bg); border-radius: 4px; overflow: hidden; position: relative; }
   .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 4px; transition: width 80ms linear; }
@@ -175,6 +180,13 @@
   </div>
   <div class="source">
     <button class="chip" id="sourceChip" title="Choose the audio input">…</button>
+    <div class="listen">
+      <button class="chip" id="listenBtn" aria-pressed="false" title="Hear the incoming signal through this Mac's speakers or headphones">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 10V8a5.5 5.5 0 0 1 11 0v2"/><rect x="2" y="9.5" width="3" height="4.5" rx="1"/><rect x="11" y="9.5" width="3" height="4.5" rx="1"/></svg>
+        <span>Listen</span>
+      </button>
+      <input type="range" id="listenVol" min="0" max="1" step="0.05" value="0.8" aria-label="Listening volume" hidden>
+    </div>
     <div class="meters" id="meters" aria-label="Input levels"></div>
   </div>
 </header>
@@ -315,6 +327,16 @@ function drawLiveWave(points) {
   points.forEach((d, i) => { const a = Math.max(0.02, (d + 60) / 60) * (h / 2 - 4); g.fillRect(i * bw, h / 2 - a, Math.max(1, bw - 0.5), a * 2); });
 }
 
+$("listenBtn").onclick = async () => {
+  try { render(await api("/api/monitor", { on: !(state && state.monitor && state.monitor.on) })); }
+  catch (e) { alert(e.message); }
+};
+let volTimer = null;
+$("listenVol").oninput = (e) => {
+  clearTimeout(volTimer);
+  volTimer = setTimeout(() => api("/api/monitor", { volume: +e.target.value }).catch(() => {}), 80);
+};
+
 function render(s, forceSetup) {
   state = s;
   // header: source + meters
@@ -323,6 +345,13 @@ function render(s, forceSetup) {
   chip.textContent = s.source.error ? "Input problem: click to fix" : `${s.source.device_name} · input ${ins}`;
   chip.classList.toggle("err", !!s.source.error);
   chip.title = s.source.error || "Choose the audio input";
+  const mon = s.monitor || { on: false }, lb = $("listenBtn");
+  lb.classList.toggle("on", mon.on); lb.setAttribute("aria-pressed", mon.on);
+  lb.lastElementChild.textContent = mon.on ? "Listening" : "Listen";
+  lb.title = mon.error ? "Can't play the sound: " + mon.error
+    : mon.on ? `Playing the input through ${mon.output || "this Mac"}. Click to mute.` : "Hear the incoming signal through this Mac's speakers or headphones";
+  $("listenVol").hidden = !mon.on;
+  if (document.activeElement !== $("listenVol")) $("listenVol").value = mon.volume ?? 0.8;
   const m = $("meters");
   if (m.children.length !== s.meter.length) m.innerHTML = s.meter.map((x) => `<div class="meter"><span>in ${x.input}</span><div class="bar"><i></i><b></b></div><span class="tnum"></span></div>`).join("");
   s.meter.forEach((x, k) => {

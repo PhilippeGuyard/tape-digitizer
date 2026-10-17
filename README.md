@@ -33,6 +33,9 @@ you an editor to fix the splits it isn't sure about.
   `My Drive/Music/Tapes/` and upload by themselves.
 - **Any audio interface.** Pick the device and which inputs to record from
   (stereo or mono); the choice is remembered.
+- **Listen while it records.** Level meters for each input, and a Listen
+  switch that plays the incoming signal through the Mac's speakers or
+  headphones, with its own volume.
 
 ![Recording a side](docs/images/recording.png)
 
@@ -64,6 +67,8 @@ terminal, `./tape app` does the same.)
 
 1. Click the input chip at the top to choose your interface and inputs. Set the
    deck or interface gain so loud parts peak around −6 dB on the meters.
+   Click **Listen** to hear the deck through the Mac's current sound output;
+   the slider next to it sets the volume. It doesn't affect the recording.
 2. Type a tape number (it becomes "Tape 012") or a name ("Summer mix 1987"),
    pick side A or B, and press **Start**.
 3. Press play on the deck and leave it. The side records, splits and saves.
